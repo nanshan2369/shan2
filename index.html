@@ -59651,7 +59651,7 @@ lowres, bad anatomy, bad hands, text, error, missing fingers, extra digit, fewer
             // b. 立刻根据新的状态来显示或隐藏状态栏
             statusBar.style.display = isEnabled ? "flex" : "none";
           });
-
+          // ===============
           // 绑定“使用名字生成”按钮的点击事件
           const genAvatarBtn = document.getElementById('generate-name-avatar-btn');
           if (genAvatarBtn) {
@@ -59662,9 +59662,12 @@ lowres, bad anatomy, bad hands, text, error, missing fingers, extra digit, fewer
                   
                   // 如果输入框没字，或者输入框被隐藏了，这就弹窗问用户要个字
                   if (!name || nameInput.offsetParent === null) {
-                      name = await showCustomPrompt("生成头像", "请输入一个字或名字来生成头像");
+                      name = await showCustomPrompt("生成头像", "请输入名字来生成头像");
                       if (!name) return; // 用户取消
                   }
+                  
+                  // 去除多余空格
+                  name = name.trim();
 
                   // 2. 开始画图
                   const canvas = document.createElement('canvas');
@@ -59680,7 +59683,7 @@ lowres, bad anatomy, bad hands, text, error, missing fingers, extra digit, fewer
                       '#E6EE9C', '#F4FF81', '#CFD8DC', '#B0BEC5'
                   ];
                   
-                  // 根据名字计算一个固定的颜色索引
+                  // 根据名字计算颜色
                   let charCodeSum = 0;
                   for (let i = 0; i < name.length; i++) {
                       charCodeSum += name.charCodeAt(i);
@@ -59691,10 +59694,19 @@ lowres, bad anatomy, bad hands, text, error, missing fingers, extra digit, fewer
                   ctx.fillStyle = colors[colorIndex];
                   ctx.fillRect(0, 0, size, size);
 
-                  // 绘制文字 (取第一个字)
-                  const text = name.trim().substring(0, 1).toUpperCase(); 
+                  // 动态计算字号
+                  let fontSize = 100; // 默认一个字时的字号
+                  if (name.length === 2) {
+                      fontSize = 80; // 两个字
+                  } else if (name.length === 3) {
+                      fontSize = 60; // 三个字
+                  } else if (name.length >= 4) {
+                      fontSize = 40; // 四个字及以上
+                  }
+
+                  // 绘制文字
                   ctx.fillStyle = '#FFFFFF'; // 文字颜色：白色
-                  ctx.font = 'bold 100px sans-serif'; // 字体大小
+                  ctx.font = `bold ${fontSize}px sans-serif`; // 应用动态字号
                   ctx.textAlign = 'center';
                   ctx.textBaseline = 'middle';
                   
@@ -59705,14 +59717,14 @@ lowres, bad anatomy, bad hands, text, error, missing fingers, extra digit, fewer
                   ctx.shadowOffsetY = 2;
 
                   // 在中间画字 (+5 是为了视觉修正)
-                  ctx.fillText(text, size / 2, size / 2 + 5); 
+                  ctx.fillText(name, size / 2, size / 2 + 5); 
 
                   // 3. 转成图片并显示到预览框
                   const avatarUrl = canvas.toDataURL('image/png');
                   document.getElementById('preset-avatar-preview').src = avatarUrl;
               });
           }
-
+          // ===============
           // 4. 根据最终的锁屏设置，决定应用启动时第一个显示的屏幕
           if (lockScreenEnabled) {
             lockPhone(); // 如果设置是“启用”，就锁定手机
