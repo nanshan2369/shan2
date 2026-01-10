@@ -24469,10 +24469,23 @@ lowres, bad anatomy, bad hands, text, error, missing fingers, extra digit, fewer
                     msg.content[0]?.type === "image_url"
                   ) {
                     const prefix = `(Timestamp: ${msg.timestamp}) `;
-                    return {
+                    //return {
+                    //  role: "user",
+                    //  content: [{ type: "text", text: prefix }, ...msg.content],
+                    //};
+                    // 如果这条消息的索引大于 lastAssistantIndex，说明它是 AI 上次回复之后用户发的（属于当前轮次），保留图片。
+                    // 否则，说明它是更早之前的轮次，替换为文字。
+                    if (index > lastAssistantIndex) {
+                      return {
                       role: "user",
                       content: [{ type: "text", text: prefix }, ...msg.content],
                     };
+                    } else {
+                    return {
+                      role: "user",
+                      content: prefix + "[用户发送了一张图片]", // 历史图片转为文字描述
+                      };
+                    }
                   }
 
                   if (
@@ -34962,6 +34975,15 @@ lowres, bad anatomy, bad hands, text, error, missing fingers, extra digit, fewer
           const historySlice = chat.history
             .filter((msg) => !msg.isHidden)
             .slice(-maxMemory);
+
+          // --- 找到最后一条 AI 消息的位置 ---
+          let lastAssistantIndex = -1;
+          for (let i = historySlice.length - 1; i >= 0; i--) {
+            if (historySlice[i].role === 'assistant') {
+              lastAssistantIndex = i;
+              break;
+            }
+          }
 
           // 2. 格式化这些记录，让AI能看懂
           const recentContextSummary = historySlice
