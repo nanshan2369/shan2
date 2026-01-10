@@ -6149,11 +6149,22 @@
             <label>头像</label>
             <div class="avatar-upload">
               <img id="preset-avatar-preview" />
-              <button
+              <!-- <button
                 onclick="document.getElementById('preset-avatar-input').click()"
               >
                 上传头像
-              </button>
+              </button> -->
+              <!-- 新增：用一个 flex 容器把两个按钮包起来，让它们并排 -->
+              <div style="display: flex; gap: 10px; justify-content: center; width: 100%; margin-bottom: 10px;">  
+                <!-- 原来的上传按钮 -->
+                <button onclick="document.getElementById('preset-avatar-input').click()" style="flex: 1;">
+                  上传头像
+                </button>
+                <!-- ★★★ 新增：生成头像按钮 (样式和上面的一样) ★★★ -->
+                <button id="generate-name-avatar-btn" style="flex: 1;">
+                  使用名字生成
+                </button> 
+              </div>
 
               <button
                 id="persona-editor-change-frame-btn"
@@ -59640,6 +59651,67 @@ lowres, bad anatomy, bad hands, text, error, missing fingers, extra digit, fewer
             // b. 立刻根据新的状态来显示或隐藏状态栏
             statusBar.style.display = isEnabled ? "flex" : "none";
           });
+
+          // 绑定“使用名字生成”按钮的点击事件
+          const genAvatarBtn = document.getElementById('generate-name-avatar-btn');
+          if (genAvatarBtn) {
+              genAvatarBtn.addEventListener('click', async () => {
+                  // 获取名字输入框的内容
+                  const nameInput = document.getElementById('npc-editor-name-input');
+                  let name = nameInput.value.trim();
+                  
+                  // 如果输入框没字，或者输入框被隐藏了，这就弹窗问用户要个字
+                  if (!name || nameInput.offsetParent === null) {
+                      name = await showCustomPrompt("生成头像", "请输入一个字或名字来生成头像");
+                      if (!name) return; // 用户取消
+                  }
+
+                  // 2. 开始画图
+                  const canvas = document.createElement('canvas');
+                  const size = 200; // 头像尺寸
+                  canvas.width = size;
+                  canvas.height = size;
+                  const ctx = canvas.getContext('2d');
+
+                  // 预设一些好看的低饱和度背景颜色 (莫兰迪/马卡龙色系)
+                  const colors = [
+                      '#FF9AA2', '#FFB7B2', '#FFDAC1', '#E2F0CB', '#B5EAD7', '#C7CEEA',
+                      '#90CAF9', '#F48FB1', '#CE93D8', '#B39DDB', '#80CBC4', '#FFCC80',
+                      '#E6EE9C', '#F4FF81', '#CFD8DC', '#B0BEC5'
+                  ];
+                  
+                  // 根据名字计算一个固定的颜色索引
+                  let charCodeSum = 0;
+                  for (let i = 0; i < name.length; i++) {
+                      charCodeSum += name.charCodeAt(i);
+                  }
+                  const colorIndex = charCodeSum % colors.length;
+
+                  // 绘制背景
+                  ctx.fillStyle = colors[colorIndex];
+                  ctx.fillRect(0, 0, size, size);
+
+                  // 绘制文字 (取第一个字)
+                  const text = name.trim().substring(0, 1).toUpperCase(); 
+                  ctx.fillStyle = '#FFFFFF'; // 文字颜色：白色
+                  ctx.font = 'bold 100px sans-serif'; // 字体大小
+                  ctx.textAlign = 'center';
+                  ctx.textBaseline = 'middle';
+                  
+                  // 给文字加一点点投影
+                  ctx.shadowColor = "rgba(0, 0, 0, 0.1)";
+                  ctx.shadowBlur = 5;
+                  ctx.shadowOffsetX = 2;
+                  ctx.shadowOffsetY = 2;
+
+                  // 在中间画字 (+5 是为了视觉修正)
+                  ctx.fillText(text, size / 2, size / 2 + 5); 
+
+                  // 3. 转成图片并显示到预览框
+                  const avatarUrl = canvas.toDataURL('image/png');
+                  document.getElementById('preset-avatar-preview').src = avatarUrl;
+              });
+          }
 
           // 4. 根据最终的锁屏设置，决定应用启动时第一个显示的屏幕
           if (lockScreenEnabled) {
