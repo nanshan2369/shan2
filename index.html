@@ -24409,6 +24409,13 @@ lowres, bad anatomy, bad hands, text, error, missing fingers, extra digit, fewer
                     } else if (msg.type === "waimai_request") {
                       assistantMsgObject.productInfo = msg.productInfo;
                       assistantMsgObject.amount = msg.amount;
+                    } else if (msg.type === "naiimag") {
+                    //AI 在聊天中直接发图 (type: "naiimag")
+                    // 强制覆盖 type，确保 AI 知道这是生图记录
+                      assistantMsgObject.type = "naiimag";
+                    // 【关键】只发送 prompt，绝对不要发送 imageUrl (Base64)
+                    // 如果 prompt 丢失，给一个默认值，防止 API 报错
+                      assistantMsgObject.prompt = msg.prompt || msg.fullPrompt || "generated anime image";
                     } else {
                       if (msg.quote) {
                         assistantMsgObject.quote_reply = {
@@ -24972,7 +24979,14 @@ lowres, bad anatomy, bad hands, text, error, missing fingers, extra digit, fewer
                     } else if (msg.type === "waimai_request") {
                       assistantMsgObject.productInfo = msg.productInfo;
                       assistantMsgObject.amount = msg.amount;
-                    } else {
+                    } else if (msg.type === "naiimag") {
+                    //AI 在聊天中直接发图 (type: "naiimag")
+                    // 强制覆盖 type，确保 AI 知道这是生图记录
+                      assistantMsgObject.type = "naiimag";
+                    // 【关键】只发送 prompt，绝对不要发送 imageUrl (Base64)
+                    // 如果 prompt 丢失，给一个默认值，防止 API 报错
+                      assistantMsgObject.prompt = msg.prompt || msg.fullPrompt || "generated anime image";
+                    }else {
                       if (msg.quote) {
                         assistantMsgObject.quote_reply = {
                           target_sender: msg.quote.senderName,
