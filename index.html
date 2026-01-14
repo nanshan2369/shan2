@@ -45012,10 +45012,9 @@ lowres, bad anatomy, bad hands, text, error, missing fingers, extra digit, fewer
 
           const settings = chat.settings;
           const breakdown = [];
-          const outlierThreshold = 300; // 设定阈值：超过300字符被视为"大消息"
-          let outliers = []; // 用于存储异常大的消息
+          const outlierThreshold = 500; // 提高一点阈值，减少误报
+          let outliers = []; 
 
-          // ... (前1-4部分保持不变: 人设、世界书、表情包、总结) ...
           // 1. 核心人设
           let personaText = chat.isGroup
             ? `群聊...${chat.members.map((m) => m.persona).join("")}`
@@ -45025,22 +45024,21 @@ lowres, bad anatomy, bad hands, text, error, missing fingers, extra digit, fewer
             count: calculateTokenCount(personaText),
           });
 
-          // 2. 世界书
+          // 2. 世界书 (仅计算 ID 关联的，不遍历库)
           let wbText = "";
-          if (settings.linkedWorldBookIds) {
-            wbText = settings.linkedWorldBookIds
-              .map((id) => {
-                const b = state.worldBooks.find((wb) => wb.id === id);
-                return b ? b.content : "";
-              })
-              .join("");
+          if (settings.linkedWorldBookIds && settings.linkedWorldBookIds.length > 0) {
+             // 优化：只查找需要的 ID
+             wbText = settings.linkedWorldBookIds.map(id => {
+                 const book = state.worldBooks.find(b => b.id === id);
+                 return book ? book.content : "";
+             }).join("");
           }
           breakdown.push({
             name: "世界书",
             count: calculateTokenCount(wbText),
           });
 
-          // 3. 表情包定义
+          // 3. 表情包定义 (通常不大，保持原样)
           let stickerText = "";
           const allStickers = [
             ...(settings.stickerLibrary || []),
@@ -45053,22 +45051,25 @@ lowres, bad anatomy, bad hands, text, error, missing fingers, extra digit, fewer
             count: calculateTokenCount(stickerText),
           });
 
-          // 4. 长期记忆
+          // 4. 长期记忆 (总结)
+          // 优化：只取 content 字段长度，不转换对象
           const summaryText = chat.history
             .filter((m) => m.type === "summary")
-            .map((s) => s.content)
-            .join("");
+            .reduce((acc, curr) => acc + (curr.content || "").length, 0);
           breakdown.push({
             name: "长期记忆(总结)",
-            count: calculateTokenCount(summaryText),
+            count: summaryText, // 这里直接是数字了，不用 calculateTokenCount
           });
 
-          // 5. 短期记忆 (对话) - 【核心修改部分】
+          // 5. 短期记忆 (对话) - 【性能优化核心区】
+          // 先过滤隐藏消息
           const history = chat.history.filter((msg) => !msg.isHidden);
+          // 获取记忆深度
           const memoryDepth = settings.maxMemory || 10;
+          // 只取最后 N 条！这一步最关键，不要遍历整个 history
           const contextMessages = history.slice(-memoryDepth);
 
-          // --- 核心修复 A：在这里也计算一次 lastAssistantIndex ---
+          // 计算最后一条 AI 消息的位置 (相对索引)
           let lastAssistantIndex = -1;
           for (let i = contextMessages.length - 1; i >= 0; i--) {
             if (contextMessages[i].role === 'assistant') {
@@ -45080,59 +45081,55 @@ lowres, bad anatomy, bad hands, text, error, missing fingers, extra digit, fewer
           let userMsgLen = 0;
           let aiMsgLen = 0;
 
-          // contextMessages.forEach((msg) => {
-          //   let content =
-          //     typeof msg.content === "string"
-          //       ? msg.content
-          //       : JSON.stringify(msg.content);
-          //   let len = calculateTokenCount(content);
-
+          // 仅遍历这 N 条消息
           contextMessages.forEach((msg, index) => {
-            let contentToMeasure = "";
+            let len = 0;
+            let previewText = "";
 
-            // --- 核心修复 B：判断是否为图片，并应用省流规则 ---
+            // --- 情况 A: 图片消息 ---
             if (Array.isArray(msg.content) && msg.content[0]?.type === "image_url") {
-                // 逻辑同发送模块：
-                // 如果当前消息索引 > 最后一条AI消息索引，说明是本轮新图 -> 计算原图大小
-                // 否则 -> 只计算 "[用户发送了一张图片]" 这几个字的长度
+                // 逻辑：如果是本轮新图 (索引 > AI最后回复) -> 计算原图 Base64
                 if (index > lastAssistantIndex) {
-                    contentToMeasure = JSON.stringify(msg.content); // 原图数据，很大
+                    // 这里我们只计算 url 的长度，加上一些 JSON 符号的预估值，避免 JSON.stringify 大对象
+                    const url = msg.content[0].image_url.url || "";
+                    len = url.length + 50; // +50 是 json 结构的开销
+                    previewText = "[🖼️ 本轮新图 (占用大量Token)]";
                 } else {
-                    contentToMeasure = "(Timestamp: " + msg.timestamp + ") [用户发送了一张图片]"; // 省流文本，很小
+                    // 逻辑：如果是旧图 -> 只计算替代文字的长度
+                    const text = `(Timestamp: ${msg.timestamp}) [用户发送了一张图片]`;
+                    len = text.length;
+                    previewText = "[📝 历史图片 (已转文字)]";
                 }
             } 
-            // 普通文本或其他类型
+            // --- 情况 B: 普通文本 ---
             else {
-                contentToMeasure = typeof msg.content === "string" 
-                    ? msg.content 
-                    : JSON.stringify(msg.content);
+                const contentStr = String(msg.content || "");
+                len = contentStr.length;
+                previewText = contentStr.substring(0, 20);
             }
 
-            let len = calculateTokenCount(contentToMeasure);
+            // 统计归类
+            if (msg.role === "user") userMsgLen += len;
+            else aiMsgLen += len;
 
-            // --- 异常检测逻辑 ---
+            // 异常检测 (仅检测特别巨大的文本，图片如果被优化了就不算异常)
             if (len > outlierThreshold) {
               outliers.push({
                 role: msg.role,
-                preview: content.substring(0, 15) + "...", // 预览前15个字
+                preview: previewText + "...",
                 count: len,
-                timestamp: msg.timestamp, // 用于跳转
+                timestamp: msg.timestamp,
               });
             }
-            // ------------------
-
-            if (msg.role === "user") userMsgLen += len;
-            else aiMsgLen += len;
           });
 
-          // 对异常消息按大小排序 (最大的在前面)
+          // 对异常消息排序
           outliers.sort((a, b) => b.count - a.count);
 
           breakdown.push({ name: "短期记忆(用户)", count: userMsgLen });
           breakdown.push({ name: "短期记忆(AI)", count: aiMsgLen });
           breakdown.push({ name: "系统格式指令", count: 800 });
 
-          // 返回数据增加了 outliers 字段
           return { items: breakdown, outliers: outliers };
         }
 
@@ -47562,42 +47559,73 @@ lowres, bad anatomy, bad hands, text, error, missing fingers, extra digit, fewer
         }
 
         /**
-         * 压缩图片至指定质量并返回Base64，同时跳过GIF
-         * @param {string} base64Str - 原始图片的Base64字符串 (data:...)
+         * 压缩图片至指定质量并调整尺寸，同时跳过GIF
+         * @param {string} base64Str - 原始图片的Base64字符串
          * @param {number} quality - 压缩质量 (0.1 - 1.0)
-         * @returns {Promise<string>} - 返回压缩后的JPEG格式的Base64字符串，或原始的GIF/PNG字符串
+         * @returns {Promise<string>} - 返回压缩后的JPEG格式Base64
          */
         function compressImage(base64Str, quality) {
           return new Promise((resolve, reject) => {
-            // 如果是 GIF，或者质量设置为1.0（不压缩），直接返回原图，不进行任何处理。
-            if (
-              base64Str.startsWith("data:image/gif") ||
-              quality >= 1.0 ||
-              !base64Str.startsWith("data:image")
-            ) {
-              resolve(base64Str);
-              return;
-            }
+              // 1. 如果是 GIF，为了保留动效，直接原样返回，不压缩
+              if (base64Str.startsWith("data:image/gif") || !base64Str.startsWith("data:image")) {
+                  resolve(base64Str);
+                  return;
+              }
 
-            const img = new Image();
-            img.src = base64Str;
+              const img = new Image();
+              img.src = base64Str;
 
-            img.onload = () => {
-              const canvas = document.createElement("canvas");
-              const ctx = canvas.getContext("2d");
-              canvas.width = img.width;
-              canvas.height = img.height;
-              ctx.drawImage(img, 0, 0);
+              img.onload = () => {
+                  // === 【核心修改：尺寸限制】 ===
+                  const MAX_WIDTH = 1024;  // 限制最大宽度 (建议 1024 或 800)
+                  const MAX_HEIGHT = 1024; // 限制最大高度
 
-              // 确保 PNG 和其他静态图能被正确压缩。
-              const compressedBase64 = canvas.toDataURL("image/jpeg", quality);
-              resolve(compressedBase64);
-            };
+                  let width = img.width;
+                  let height = img.height;
 
-            img.onerror = (err) => {
-              console.error("图片加载失败，无法压缩:", err);
-              reject(new Error("图片加载失败，无法压缩"));
-            };
+                  // 如果图片尺寸超过限制，按比例缩小
+                  if (width > height) {
+                      if (width > MAX_WIDTH) {
+                          height *= MAX_WIDTH / width;
+                          width = MAX_WIDTH;
+                      }
+                  } else {
+                      if (height > MAX_HEIGHT) {
+                          width *= MAX_HEIGHT / height;
+                          height = MAX_HEIGHT;
+                      }
+                  }
+                  // ===========================
+
+                  const canvas = document.createElement("canvas");
+                  const ctx = canvas.getContext("2d");
+                  
+                  // 使用计算后的新尺寸
+                  canvas.width = width;
+                  canvas.height = height;
+                  
+                  // 铺个白底，防止PNG透明背景变黑
+                  ctx.fillStyle = "#FFFFFF";
+                  ctx.fillRect(0, 0, width, height);
+                  
+                  ctx.drawImage(img, 0, 0, width, height);
+
+                  // 强制转为 JPEG，进一步减小体积
+                  const compressedBase64 = canvas.toDataURL("image/jpeg", quality);
+                  
+                  // 如果压缩后反而变大了（极少情况），就返回原图，否则返回压缩图
+                  if (compressedBase64.length < base64Str.length) {
+                       resolve(compressedBase64);
+                  } else {
+                       resolve(base64Str);
+                  }
+              };
+
+              img.onerror = (err) => {
+                  console.error("图片加载失败，跳过压缩:", err);
+                  // 出错时为了不阻断流程，直接返回原图
+                  resolve(base64Str);
+              };
           });
         }
 
